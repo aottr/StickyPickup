@@ -36,13 +36,18 @@ namespace OttrOne.StickyPickup
             }
             get => BoneIndex;
         }
-
+        [Tooltip("Root bone for the Sticky Pickup.")]
         public HumanBodyBones Bone;
+        [Tooltip("Set if Sticky Pickup only works for player in VR.")]
         public bool OnlyVR;
+        [Tooltip("Radius of the spherical tracking area.")]
         public float Radius = 0.3f;
 
         private bool localStickedOn = false;
         private bool localPickedUp = false;
+
+        private Vector3 _origPos;
+        private Quaternion _origRot;
 
         [UdonSynced, FieldChangeCallback(nameof(PutGravity)), HideInInspector]
         public bool isKinematic;
@@ -56,11 +61,7 @@ namespace OttrOne.StickyPickup
                 this.isKinematic = !value;
                 this.rigidBody.isKinematic = !value;
                 // when gravity is re-enabled, set rested to false on all clients
-                if (value)
-                {
-                    this.isRested = false;
-                }
-                Debug.Log($"Setter: kinematic before: {wasKinematic}, kinematic now: {isKinematic}");
+                this.isRested = false; // since the bone check catches before, this is still okay when Put = false
             }
         }
 
@@ -79,6 +80,20 @@ namespace OttrOne.StickyPickup
             this.wasKinematic = rigidBody.isKinematic;
             this.BoneIndex = -1;
             this.isRested = true;
+
+            _origPos = new Vector3(rigidBody.transform.position.x, rigidBody.transform.position.y, rigidBody.transform.position.z);
+            _origRot = new Quaternion(rigidBody.transform.rotation.x, rigidBody.transform.rotation.y, rigidBody.transform.rotation.z, rigidBody.transform.rotation.w);
+            if (this.Radius < 0) Radius = 0f;
+        }
+
+        public void ResetPosition()
+        {
+            this.rigidBody.transform.SetPositionAndRotation(_origPos, _origRot);
+        }
+
+        public void ResetPositionAllPlayers()
+        {
+            SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget.All, "ResetPosition");
         }
 
         /// <summary>
@@ -100,7 +115,6 @@ namespace OttrOne.StickyPickup
             if (wasKinematic == false)
             {
                 PutGravity = false;
-                Debug.Log($"kinematic before: {wasKinematic}, kinematic now: {isKinematic}");
             }
             RequestSerialization();
         }
@@ -144,7 +158,6 @@ namespace OttrOne.StickyPickup
                 if (wasKinematic == false)
                 {
                     PutGravity = true;
-                    Debug.Log($"kinematic before: {wasKinematic}, kinematic now: {isKinematic}");
                 }
             }
             RequestSerialization();
@@ -194,11 +207,6 @@ namespace OttrOne.StickyPickup
                     isRested = true;
                 }
             }
-        }
-
-        public override void OnDeserialization()
-        {
-
         }
 
         public override void OnPlayerJoined(VRCPlayerApi player)
