@@ -12,11 +12,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c333ccfdd0cbdbc4ca30cef2dd6e6b9b, type: 3}
   m_Name: StickyPickup
   m_EditorClassIdentifier: 
-  serializedUdonProgramAsset: {fileID: 11400000, guid: d22860a989160be49a08bffc0bee68b0,
+  serializedUdonProgramAsset: {fileID: 11400000, guid: 15786a3be9903984a974badffb3c4794,
     type: 2}
   udonAssembly: 
   assemblyError: 
-  sourceCsScript: {fileID: 11500000, guid: b4ac30aa6130cb44cad1c73502b5c280, type: 3}
+  sourceCsScript: {fileID: 11500000, guid: a4c4bc801aa81d2468209fd711b4ce95, type: 3}
   behaviourSyncMode: 1
   behaviourIDHeapVarName: __refl_const_intnl_udonTypeID
   compileErrors: []
