@@ -36,6 +36,7 @@ namespace OttrOne.StickyPickup
             }
             get => BoneIndex;
         }
+        [Header("SyncedStickyPickup v1.1.2")]
         [Tooltip("Root bone for the Sticky Pickup.")]
         public HumanBodyBones Bone;
         [Tooltip("Set if Sticky Pickup only works for player in VR.")]
@@ -43,27 +44,16 @@ namespace OttrOne.StickyPickup
         [Tooltip("Radius of the spherical tracking area.")]
         public float Radius = 0.3f;
 
+        [Tooltip("Wont set up the item to be kinematic. (Issue #2)")]
+        public bool IgnoreGravityCheck;
+
         private bool localStickedOn = false;
         private bool localPickedUp = false;
 
         private Vector3 _origPos;
         private Quaternion _origRot;
 
-        [UdonSynced, FieldChangeCallback(nameof(PutGravity)), HideInInspector]
-        public bool isKinematic;
         private bool wasKinematic;
-        private bool isRested;
-
-        public bool PutGravity
-        {
-            set
-            {
-                this.isKinematic = !value;
-                this.rigidBody.isKinematic = !value;
-                // when gravity is re-enabled, set rested to false on all clients
-                this.isRested = false; // since the bone check catches before, this is still okay when Put = false
-            }
-        }
 
         private Rigidbody rigidBody;
         private VRC_Pickup pickup;
@@ -79,16 +69,22 @@ namespace OttrOne.StickyPickup
             this.pickup = (VRC_Pickup)gameObject.GetComponent(typeof(VRC_Pickup));
             this.wasKinematic = rigidBody.isKinematic;
             this.BoneIndex = -1;
-            this.isRested = true;
 
             _origPos = new Vector3(rigidBody.transform.position.x, rigidBody.transform.position.y, rigidBody.transform.position.z);
             _origRot = new Quaternion(rigidBody.transform.rotation.x, rigidBody.transform.rotation.y, rigidBody.transform.rotation.z, rigidBody.transform.rotation.w);
             if (this.Radius < 0) Radius = 0f;
         }
 
+        /// <summary>
+        /// Resets the position, bone and rotation of the item
+        /// </summary>
         public void ResetPosition()
         {
+            pickup.Drop();
+            SyncedBoneIndex = -1;
+            if (!IgnoreGravityCheck) rigidBody.isKinematic = this.wasKinematic;
             this.rigidBody.transform.SetPositionAndRotation(_origPos, _origRot);
+            Debug.Log($"Requested Reset for {gameObject.name}");
         }
 
         public void ResetPositionAllPlayers()
@@ -112,13 +108,21 @@ namespace OttrOne.StickyPickup
             localPickedUp = true;
 
             // disable gravity effect if existing
-            if (wasKinematic == false)
+            if (!IgnoreGravityCheck) // box this to avoid unnecessary checks
             {
-                PutGravity = false;
+                if (!rigidBody.isKinematic && !this.wasKinematic) // is gravity item
+                {
+                    rigidBody.isKinematic = true;
+                    Debug.Log($"Enabled Kinematic");
+                }
             }
             RequestSerialization();
         }
 
+        /// <summary>
+        /// Calculates the positional and rotational offset between the selected bone and the object on pickup / placing
+        /// </summary>
+        /// <param name="bone">Humanoid bone the item is attached to</param>
         private void CalculateOffsets(HumanBodyBones bone)
         {
             Vector3 objPos = this.rigidBody.transform.position;
@@ -153,16 +157,13 @@ namespace OttrOne.StickyPickup
             {
                 SyncedBoneIndex = -1;
                 localPickedUp = false;
-
-                // reset gravity
-                if (wasKinematic == false)
-                {
-                    PutGravity = true;
-                }
             }
             RequestSerialization();
         }
 
+        /// <summary>
+        /// Main function to synchronize Position and states between the clients.
+        /// </summary>
         public override void PostLateUpdate()
         {
             if (localStickedOn)
@@ -183,10 +184,17 @@ namespace OttrOne.StickyPickup
             {
                 Vector3 bonePosition = Networking.GetOwner(gameObject).GetBonePosition((HumanBodyBones)this.BoneIndex);
                 Quaternion boneRotation = Networking.GetOwner(gameObject).GetBoneRotation((HumanBodyBones)this.BoneIndex);
-
+                if (!IgnoreGravityCheck) // box this to avoid unnecessary checks
+                {
+                    if (!rigidBody.isKinematic && !this.wasKinematic) // is gravity item
+                    {
+                        rigidBody.isKinematic = true;
+                        Debug.Log($"Enabled Kinematic");
+                    }
+                }
                 this.rigidBody.transform.SetPositionAndRotation((boneRotation * objectPosOffset) + bonePosition, boneRotation * objectRotOffset);
             }
-            else if (!isRested) // loop part gets called when object is still moving while not being attached to something
+            else
             {
                 // idle gravity mode -> sync position till next pickup
                 if (objectPosOffset != rigidBody.transform.position)
@@ -202,9 +210,13 @@ namespace OttrOne.StickyPickup
                         rigidBody.transform.SetPositionAndRotation(objectPosOffset, objectRotOffset);
                     }
                 }
-                else
+                if (!IgnoreGravityCheck) // box this to avoid unnecessary checks
                 {
-                    isRested = true;
+                    if (rigidBody.isKinematic && !this.wasKinematic)
+                    {
+                        rigidBody.isKinematic = false;
+                        Debug.Log($"Disabled Kinematic");
+                    }
                 }
             }
         }

@@ -23,6 +23,7 @@ namespace OttrOne.StickyPickup
     [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
     public class StickyPickup : UdonSharpBehaviour
     {
+        [Header("StickyPickup v1.0.0")]
         public HumanBodyBones Bone;
         public bool OnlyVR;
         public float Radius = 0.3f;
