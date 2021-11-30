@@ -33,6 +33,7 @@ namespace OttrOne.StickyPickup
                 localStickedOn = false;
                 localPickedUp = false; // in case it gets stolen from the hands
                 BoneIndex = value;
+                Debug.Log("SetSB");
             }
             get => BoneIndex;
         }
@@ -150,11 +151,9 @@ namespace OttrOne.StickyPickup
         /// </summary>
         public override void OnDrop()
         {
-            if (PlaceOnDrop)
-            {
-                Attach();
-            }
-            else if (localPickedUp)
+            if (PlaceOnDrop) TryAttach();
+            
+            if (localPickedUp) // still true if try was not successful
             {
                 SyncedBoneIndex = -1;
                 localPickedUp = false;
@@ -166,11 +165,12 @@ namespace OttrOne.StickyPickup
         {
             if (PlaceOnDrop) return;
 
-            Attach();
-            RequestSerialization();
+            TryAttach();
+            // successful try will set localStickedOn to true
+            if (localStickedOn) RequestSerialization();
         }
 
-        private void Attach()
+        private void TryAttach()
         {
             Vector3 objPos = this.rigidBody.transform.position;
             Vector3 plyPos = Networking.LocalPlayer.GetBonePosition(Bone);
@@ -182,11 +182,7 @@ namespace OttrOne.StickyPickup
                 localStickedOn = true;
                 localPickedUp = false;
                 CalculateOffsets(Bone);
-            }
-            else
-            {
-                SyncedBoneIndex = -1;
-                localPickedUp = false;
+                if (!PlaceOnDrop) pickup.Drop();
             }
         }
 
@@ -257,6 +253,14 @@ namespace OttrOne.StickyPickup
             {
                 SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget.All, "ResetPosition");
             }
+        }
+
+        public override void OnOwnershipTransferred(VRCPlayerApi player)
+        {
+            if (player == Networking.LocalPlayer) return;
+
+            localStickedOn = false;
+            localPickedUp = false; // in case it gets stolen from the hands
         }
 
         public override void OnPlayerJoined(VRCPlayerApi player)
