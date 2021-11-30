@@ -24,19 +24,6 @@ namespace OttrOne.StickyPickup
     [UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
     public class SyncedStickyPickup : UdonSharpBehaviour
     {
-        [UdonSynced, FieldChangeCallback(nameof(SyncedBoneIndex)), HideInInspector]
-        public int BoneIndex; // couters idle since its either attached to hand or body bone
-        public int SyncedBoneIndex
-        {
-            set
-            {
-                localStickedOn = false;
-                localPickedUp = false; // in case it gets stolen from the hands
-                BoneIndex = value;
-                Debug.Log("SetSB");
-            }
-            get => BoneIndex;
-        }
         [Header("SyncedStickyPickup v1.2.0 Beta")]
         [Tooltip("Root bone for the Sticky Pickup.")]
         public HumanBodyBones Bone;
@@ -52,7 +39,7 @@ namespace OttrOne.StickyPickup
         [Tooltip("Trigger collider as a cage for the pickup.")]
         public Collider AreaCollider;
         [Tooltip("Reset height will be ignored if area collider is given.")]
-        public float ResetHeight;
+        public float ResetHeight = -50;
 
         private bool localStickedOn = false;
         private bool localPickedUp = false;
@@ -62,8 +49,13 @@ namespace OttrOne.StickyPickup
 
         private bool wasKinematic;
 
+        private VRCPlayerApi owner;
+
         private Rigidbody rigidBody;
         private VRC_Pickup pickup;
+
+        [UdonSynced, HideInInspector]
+        public int BoneIndex; // couters idle since its either attached to hand or body bone
 
         [UdonSynced, HideInInspector]
         public Vector3 objectPosOffset;
@@ -75,7 +67,7 @@ namespace OttrOne.StickyPickup
             this.rigidBody = (Rigidbody)gameObject.GetComponent(typeof(Rigidbody));
             this.pickup = (VRC_Pickup)gameObject.GetComponent(typeof(VRC_Pickup));
             this.wasKinematic = rigidBody.isKinematic;
-            this.BoneIndex = -1;
+            BoneIndex = -1;
 
             if (!PlaceOnDrop) this.pickup.AutoHold = VRC_Pickup.AutoHoldMode.Yes;
 
@@ -91,10 +83,14 @@ namespace OttrOne.StickyPickup
             pickup.Drop();
             rigidBody.velocity = Vector3.zero;
             rigidBody.angularVelocity = Vector3.zero;
-            SyncedBoneIndex = -1;
+            BoneIndex = -1;
+            localStickedOn = false;
+            localPickedUp = false;
+
             this.gameObject.SetActive(false);
             rigidBody.isKinematic = this.wasKinematic;
             this.gameObject.SetActive(true);
+
             this.rigidBody.transform.SetPositionAndRotation(_origPos, _origRot);
             Debug.Log($"Requested Reset for {gameObject.name}");
         }
@@ -110,14 +106,18 @@ namespace OttrOne.StickyPickup
         /// </summary>
         public override void OnPickup()
         {
+            // set ownership
             Networking.SetOwner(Networking.LocalPlayer, this.gameObject);
+            owner = Networking.LocalPlayer;
+
             Debug.Log($"Pickup");
             // synced variables
-            SyncedBoneIndex = pickup.currentHand == VRC_Pickup.PickupHand.Left ? (int)HumanBodyBones.LeftHand : (int)HumanBodyBones.RightHand;
+            BoneIndex = pickup.currentHand == VRC_Pickup.PickupHand.Left ? (int)HumanBodyBones.LeftHand : (int)HumanBodyBones.RightHand;
             CalculateOffsets((HumanBodyBones)this.BoneIndex);
 
             localStickedOn = false;
             localPickedUp = true;
+
             if (!rigidBody.isKinematic && !this.wasKinematic) // is gravity item
             {
                 this.gameObject.SetActive(false);
@@ -125,6 +125,7 @@ namespace OttrOne.StickyPickup
                 this.gameObject.SetActive(true);
                 Debug.Log($"Enabled Kinematic");
             }
+
             RequestSerialization();
         }
 
@@ -155,15 +156,17 @@ namespace OttrOne.StickyPickup
             
             if (localPickedUp) // still true if try was not successful
             {
-                SyncedBoneIndex = -1;
+                BoneIndex = -1;
                 localPickedUp = false;
             }
             RequestSerialization();
         }
 
-        public override void OnPickupUseUp()
+        public override void OnPickupUseDown()
         {
             if (PlaceOnDrop) return;
+            // additional ownership check
+            if (owner != Networking.LocalPlayer) return;
 
             TryAttach();
             // successful try will set localStickedOn to true
@@ -177,7 +180,7 @@ namespace OttrOne.StickyPickup
 
             if (Vector3.Distance(objPos, plyPos) <= Radius && (Networking.LocalPlayer.IsUserInVR() || !OnlyVR))
             {
-                SyncedBoneIndex = (int)Bone;
+                BoneIndex = (int)Bone;
 
                 localStickedOn = true;
                 localPickedUp = false;
@@ -191,10 +194,13 @@ namespace OttrOne.StickyPickup
         /// </summary>
         public override void PostLateUpdate()
         {
+            if (owner == null) owner = Networking.GetOwner(gameObject);
+            if (!owner.IsValid()) owner = Networking.GetOwner(gameObject);
+
             if (localStickedOn)
             {
-                Vector3 bonePosition = Networking.LocalPlayer.GetBonePosition(Bone);
-                Quaternion boneRotation = Networking.LocalPlayer.GetBoneRotation(Bone);
+                Vector3 bonePosition = owner.GetBonePosition(Bone);
+                Quaternion boneRotation = owner.GetBoneRotation(Bone);
 
                 // calculate the wanted offset by multiplying the bonerotation with the position offset and add this to the targeted bone position
                 // calculate the wanted rotation by multiplying the current bone rotation with the calculated rotation offset 
@@ -207,8 +213,8 @@ namespace OttrOne.StickyPickup
             }
             else if (this.BoneIndex >= 0)
             {
-                Vector3 bonePosition = Networking.GetOwner(gameObject).GetBonePosition((HumanBodyBones)this.BoneIndex);
-                Quaternion boneRotation = Networking.GetOwner(gameObject).GetBoneRotation((HumanBodyBones)this.BoneIndex);
+                Vector3 bonePosition = owner.GetBonePosition((HumanBodyBones)this.BoneIndex);
+                Quaternion boneRotation = owner.GetBoneRotation((HumanBodyBones)this.BoneIndex);
                 if (!rigidBody.isKinematic && !this.wasKinematic) // is gravity item
                 {
                     this.gameObject.SetActive(false);
@@ -224,7 +230,7 @@ namespace OttrOne.StickyPickup
                 // idle gravity mode -> sync position till next pickup
                 if (objectPosOffset != rigidBody.transform.position)
                 {
-                    if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
+                    if (owner == Networking.LocalPlayer)
                     {
                         this.objectPosOffset = rigidBody.transform.position;
                         this.objectRotOffset = rigidBody.transform.rotation;
@@ -257,8 +263,12 @@ namespace OttrOne.StickyPickup
 
         public override void OnOwnershipTransferred(VRCPlayerApi player)
         {
-            if (player == Networking.LocalPlayer) return;
+            // set new owner
+            owner = player;
+            if (owner == Networking.LocalPlayer) return;
 
+            // reset old owner
+            pickup.Drop();
             localStickedOn = false;
             localPickedUp = false; // in case it gets stolen from the hands
         }
