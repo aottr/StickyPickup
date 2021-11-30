@@ -36,16 +36,22 @@ namespace OttrOne.StickyPickup
             }
             get => BoneIndex;
         }
-        [Header("SyncedStickyPickup v1.1.2")]
+        [Header("SyncedStickyPickup v1.2.0 Beta")]
         [Tooltip("Root bone for the Sticky Pickup.")]
         public HumanBodyBones Bone;
+        [Tooltip("Radius of the spherical tracking area."), Range(0.001f, 4f)]
+        public float Radius = 0.3f;
         [Tooltip("Set if Sticky Pickup only works for player in VR.")]
         public bool OnlyVR;
-        [Tooltip("Radius of the spherical tracking area.")]
-        public float Radius = 0.3f;
+        [Tooltip("Dropping the pickup inside the radius will attach it.")]
+        public bool PlaceOnDrop = false;
 
-        [Tooltip("Wont set up the item to be kinematic. (Issue #2)")]
-        public bool IgnoreGravityCheck;
+
+        [Header("Reset Options")]
+        [Tooltip("Trigger collider as a cage for the pickup.")]
+        public Collider AreaCollider;
+        [Tooltip("Reset height will be ignored if area collider is given.")]
+        public float ResetHeight;
 
         private bool localStickedOn = false;
         private bool localPickedUp = false;
@@ -70,9 +76,10 @@ namespace OttrOne.StickyPickup
             this.wasKinematic = rigidBody.isKinematic;
             this.BoneIndex = -1;
 
+            if (!PlaceOnDrop) this.pickup.AutoHold = VRC_Pickup.AutoHoldMode.Yes;
+
             _origPos = new Vector3(rigidBody.transform.position.x, rigidBody.transform.position.y, rigidBody.transform.position.z);
             _origRot = new Quaternion(rigidBody.transform.rotation.x, rigidBody.transform.rotation.y, rigidBody.transform.rotation.z, rigidBody.transform.rotation.w);
-            if (this.Radius < 0) Radius = 0f;
         }
 
         /// <summary>
@@ -81,8 +88,12 @@ namespace OttrOne.StickyPickup
         public void ResetPosition()
         {
             pickup.Drop();
+            rigidBody.velocity = Vector3.zero;
+            rigidBody.angularVelocity = Vector3.zero;
             SyncedBoneIndex = -1;
-            if (!IgnoreGravityCheck) rigidBody.isKinematic = this.wasKinematic;
+            this.gameObject.SetActive(false);
+            rigidBody.isKinematic = this.wasKinematic;
+            this.gameObject.SetActive(true);
             this.rigidBody.transform.SetPositionAndRotation(_origPos, _origRot);
             Debug.Log($"Requested Reset for {gameObject.name}");
         }
@@ -106,15 +117,12 @@ namespace OttrOne.StickyPickup
 
             localStickedOn = false;
             localPickedUp = true;
-
-            // disable gravity effect if existing
-            if (!IgnoreGravityCheck) // box this to avoid unnecessary checks
+            if (!rigidBody.isKinematic && !this.wasKinematic) // is gravity item
             {
-                if (!rigidBody.isKinematic && !this.wasKinematic) // is gravity item
-                {
-                    rigidBody.isKinematic = true;
-                    Debug.Log($"Enabled Kinematic");
-                }
+                this.gameObject.SetActive(false);
+                rigidBody.isKinematic = true;
+                this.gameObject.SetActive(true);
+                Debug.Log($"Enabled Kinematic");
             }
             RequestSerialization();
         }
@@ -142,6 +150,28 @@ namespace OttrOne.StickyPickup
         /// </summary>
         public override void OnDrop()
         {
+            if (PlaceOnDrop)
+            {
+                Attach();
+            }
+            else if (localPickedUp)
+            {
+                SyncedBoneIndex = -1;
+                localPickedUp = false;
+            }
+            RequestSerialization();
+        }
+
+        public override void OnPickupUseUp()
+        {
+            if (PlaceOnDrop) return;
+
+            Attach();
+            RequestSerialization();
+        }
+
+        private void Attach()
+        {
             Vector3 objPos = this.rigidBody.transform.position;
             Vector3 plyPos = Networking.LocalPlayer.GetBonePosition(Bone);
 
@@ -158,7 +188,6 @@ namespace OttrOne.StickyPickup
                 SyncedBoneIndex = -1;
                 localPickedUp = false;
             }
-            RequestSerialization();
         }
 
         /// <summary>
@@ -184,14 +213,14 @@ namespace OttrOne.StickyPickup
             {
                 Vector3 bonePosition = Networking.GetOwner(gameObject).GetBonePosition((HumanBodyBones)this.BoneIndex);
                 Quaternion boneRotation = Networking.GetOwner(gameObject).GetBoneRotation((HumanBodyBones)this.BoneIndex);
-                if (!IgnoreGravityCheck) // box this to avoid unnecessary checks
+                if (!rigidBody.isKinematic && !this.wasKinematic) // is gravity item
                 {
-                    if (!rigidBody.isKinematic && !this.wasKinematic) // is gravity item
-                    {
-                        rigidBody.isKinematic = true;
-                        Debug.Log($"Enabled Kinematic");
-                    }
+                    this.gameObject.SetActive(false);
+                    rigidBody.isKinematic = true;
+                    this.gameObject.SetActive(true);
+                    Debug.Log($"Enabled Kinematic");
                 }
+
                 this.rigidBody.transform.SetPositionAndRotation((boneRotation * objectPosOffset) + bonePosition, boneRotation * objectRotOffset);
             }
             else
@@ -210,14 +239,23 @@ namespace OttrOne.StickyPickup
                         rigidBody.transform.SetPositionAndRotation(objectPosOffset, objectRotOffset);
                     }
                 }
-                if (!IgnoreGravityCheck) // box this to avoid unnecessary checks
+                if (rigidBody.isKinematic && !this.wasKinematic)
                 {
-                    if (rigidBody.isKinematic && !this.wasKinematic)
-                    {
-                        rigidBody.isKinematic = false;
-                        Debug.Log($"Disabled Kinematic");
-                    }
+                    this.gameObject.SetActive(false);
+                    rigidBody.isKinematic = false;
+                    this.gameObject.SetActive(true);
+                    Debug.Log($"Disabled Kinematic");
                 }
+            }
+
+            if (AreaCollider == null && rigidBody.transform.position.y < ResetHeight) ResetPositionAllPlayers();
+        }
+
+        private void OnTriggerExit(Collider collider)
+        {
+            if (collider == AreaCollider)
+            {
+                SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget.All, "ResetPosition");
             }
         }
 
