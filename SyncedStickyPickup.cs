@@ -24,7 +24,7 @@ namespace OttrOne.StickyPickup
     [UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
     public class SyncedStickyPickup : UdonSharpBehaviour
     {
-        [Header("SyncedStickyPickup v1.2.0 Beta")]
+        [Header("SyncedStickyPickup v1.2.0")]
         [SerializeField, Tooltip("Root bone for the Sticky Pickup.")]
         private HumanBodyBones Bone;
         [SerializeField, Tooltip("Radius of the spherical tracking area."), Range(0.001f, 4f)]

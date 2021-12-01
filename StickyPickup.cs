@@ -23,19 +23,21 @@ namespace OttrOne.StickyPickup
     [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
     public class StickyPickup : UdonSharpBehaviour
     {
-        [Header("StickyPickup v1.1.0 Beta")]
-        public HumanBodyBones Bone;
-        [Range(0.001f, 4f)]
-        public float Radius = 0.3f;
-        public bool OnlyVR;
-        [Tooltip("Dropping the pickup inside the radius will attach it.")]
-        public bool PlaceOnDrop = false;
+        [Header("StickyPickup v1.1.0")]
+        [SerializeField, Tooltip("Root bone for the Sticky Pickup.")]
+        private HumanBodyBones Bone;
+        [SerializeField, Tooltip("Radius of the spherical tracking area."), Range(0.001f, 4f)]
+        private float Radius = 0.3f;
+        [SerializeField, Tooltip("Set if Sticky Pickup only works for player in VR.")]
+        private bool OnlyVR;
+        [SerializeField, Tooltip("Dropping the pickup inside the radius will attach it.")]
+        private bool PlaceOnDrop = false;
 
         [Header("Reset Options")]
-        [Tooltip("Trigger collider as a cage for the pickup.")]
-        public Collider AreaCollider;
-        [Tooltip("Reset height will be ignored if area collider is given.")]
-        public float ResetHeight;
+        [SerializeField, Tooltip("Trigger collider as a cage for the pickup.")]
+        private Collider AreaCollider;
+        [SerializeField, Tooltip("Reset height will be ignored if area collider is given.")]
+        private float ResetHeight = -50;
 
         private bool stickedOn = false;
 
@@ -61,15 +63,6 @@ namespace OttrOne.StickyPickup
             _origRot = new Quaternion(rigidBody.transform.rotation.x, rigidBody.transform.rotation.y, rigidBody.transform.rotation.z, rigidBody.transform.rotation.w);
         }
 
-        public override void OnPickup()
-        {
-            stickedOn = false;
-
-            gameObject.SetActive(false);
-            rigidBody.isKinematic = true;
-            gameObject.SetActive(true);
-        }
-
         /// <summary>
         /// Resets the position, bone and rotation of the item
         /// </summary>
@@ -78,10 +71,30 @@ namespace OttrOne.StickyPickup
             pickup.Drop();
             rigidBody.velocity = Vector3.zero;
             rigidBody.angularVelocity = Vector3.zero;
-            this.gameObject.SetActive(false);
-            rigidBody.isKinematic = this.isKinematic;
-            this.gameObject.SetActive(true);
+            SetKinematic(this.isKinematic);
             this.rigidBody.transform.SetPositionAndRotation(_origPos, _origRot);
+        }
+
+        private void SetKinematic(bool value)
+        {
+            // disabling the object (workaround for triggering the collider) will reset velo
+            Vector3 velo = rigidBody.velocity;
+            Vector3 angyVelo = rigidBody.angularVelocity;
+
+            this.gameObject.SetActive(false);
+            rigidBody.isKinematic = value;
+            this.gameObject.SetActive(true);
+
+            rigidBody.velocity = velo;
+            rigidBody.angularVelocity = angyVelo;
+
+            Debug.Log($"Set kinematic to {value}");
+        }
+        public override void OnPickup()
+        {
+            stickedOn = false;
+
+            SetKinematic(true);
         }
 
         /// <summary>
@@ -94,15 +107,12 @@ namespace OttrOne.StickyPickup
         {
             if (PlaceOnDrop)
             {
-                Attach();
+                if (Attach()) return;
             }
-            else
-            {
-                // resets kinematic on drop in world to re-enable gravity effect
-                this.gameObject.SetActive(false);
-                rigidBody.isKinematic = this.isKinematic;
-                this.gameObject.SetActive(true);
-            }
+
+            // resets kinematic on drop in world to re-enable gravity effect
+            SetKinematic(this.isKinematic);
+
         }
 
         public override void OnPickupUseUp()
@@ -112,7 +122,7 @@ namespace OttrOne.StickyPickup
             Attach();
         }
 
-        private void Attach()
+        private bool Attach()
         {
             Vector3 objPos = this.rigidBody.transform.position;
             Vector3 plyPos = Networking.LocalPlayer.GetBonePosition(Bone);
@@ -121,20 +131,16 @@ namespace OttrOne.StickyPickup
             if (Vector3.Distance(objPos, plyPos) <= Radius && (Networking.LocalPlayer.IsUserInVR() || !OnlyVR))
             {
                 stickedOn = true;
-            }
-            else
-            {
-                stickedOn = false;
-                // resets kinematic on drop in world to re-enable gravity effect
-                this.gameObject.SetActive(false);
-                rigidBody.isKinematic = this.isKinematic;
-                this.gameObject.SetActive(true);
+
+                // q^(-1) * Vector (x2-x1, y2-y1, z2-z1)
+                trackedPos = invRot * (objPos - plyPos);
+                // calculate the rotation by multiplying the current rotation with inverse player rotation
+                trackedRot = invRot * this.rigidBody.transform.rotation;
+                if (!PlaceOnDrop) pickup.Drop();
+                return true;
             }
 
-            // q^(-1) * Vector (x2-x1, y2-y1, z2-z1)
-            trackedPos = invRot * (objPos - plyPos);
-            // calculate the rotation by multiplying the current rotation with inverse player rotation
-            trackedRot = invRot * this.rigidBody.transform.rotation;
+            return false;
         }
 
         private void OnTriggerExit(Collider collider)
@@ -145,9 +151,9 @@ namespace OttrOne.StickyPickup
             }
         }
 
-        public void Update()
+        public override void PostLateUpdate()
         {
-            if (stickedOn && (Networking.LocalPlayer.IsUserInVR() || !OnlyVR))
+            if (stickedOn)
             {
                 Vector3 bonePosition = Networking.LocalPlayer.GetBonePosition(Bone);
                 Quaternion boneRotation = Networking.LocalPlayer.GetBoneRotation(Bone);
