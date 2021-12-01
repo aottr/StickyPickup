@@ -25,21 +25,21 @@ namespace OttrOne.StickyPickup
     public class SyncedStickyPickup : UdonSharpBehaviour
     {
         [Header("SyncedStickyPickup v1.2.0 Beta")]
-        [Tooltip("Root bone for the Sticky Pickup.")]
-        public HumanBodyBones Bone;
-        [Tooltip("Radius of the spherical tracking area."), Range(0.001f, 4f)]
-        public float Radius = 0.3f;
-        [Tooltip("Set if Sticky Pickup only works for player in VR.")]
-        public bool OnlyVR;
-        [Tooltip("Dropping the pickup inside the radius will attach it.")]
-        public bool PlaceOnDrop = false;
+        [SerializeField, Tooltip("Root bone for the Sticky Pickup.")]
+        private HumanBodyBones Bone;
+        [SerializeField, Tooltip("Radius of the spherical tracking area."), Range(0.001f, 4f)]
+        private float Radius = 0.3f;
+        [SerializeField, Tooltip("Set if Sticky Pickup only works for player in VR.")]
+        private bool OnlyVR;
+        [SerializeField, Tooltip("Dropping the pickup inside the radius will attach it.")]
+        private bool PlaceOnDrop = false;
 
 
         [Header("Reset Options")]
-        [Tooltip("Trigger collider as a cage for the pickup.")]
-        public Collider AreaCollider;
-        [Tooltip("Reset height will be ignored if area collider is given.")]
-        public float ResetHeight = -50;
+        [SerializeField, Tooltip("Trigger collider as a cage for the pickup.")]
+        private Collider AreaCollider;
+        [SerializeField, Tooltip("Reset height will be ignored if area collider is given.")]
+        private float ResetHeight = -50;
 
         private bool localStickedOn = false;
         private bool localPickedUp = false;
@@ -49,14 +49,11 @@ namespace OttrOne.StickyPickup
 
         private bool wasKinematic;
 
-        private VRCPlayerApi owner;
-
         private Rigidbody rigidBody;
         private VRC_Pickup pickup;
 
         [UdonSynced, HideInInspector]
         public int BoneIndex; // couters idle since its either attached to hand or body bone
-
         [UdonSynced, HideInInspector]
         public Vector3 objectPosOffset;
         [UdonSynced, HideInInspector]
@@ -87,12 +84,19 @@ namespace OttrOne.StickyPickup
             localStickedOn = false;
             localPickedUp = false;
 
-            this.gameObject.SetActive(false);
-            rigidBody.isKinematic = this.wasKinematic;
-            this.gameObject.SetActive(true);
+            SetKinematic(this.wasKinematic);
 
             this.rigidBody.transform.SetPositionAndRotation(_origPos, _origRot);
             Debug.Log($"Requested Reset for {gameObject.name}");
+        }
+
+        private void SetKinematic(bool value)
+        {
+            this.gameObject.SetActive(false);
+            rigidBody.isKinematic = value;
+            this.gameObject.SetActive(true);
+
+            Debug.Log($"Set kinematic to {value}");
         }
 
         public void ResetPositionAllPlayers()
@@ -106,11 +110,8 @@ namespace OttrOne.StickyPickup
         /// </summary>
         public override void OnPickup()
         {
-            // set ownership
             Networking.SetOwner(Networking.LocalPlayer, this.gameObject);
-            owner = Networking.LocalPlayer;
-
-            Debug.Log($"Pickup");
+            Networking.LocalPlayer.SetPlayerTag("ottrone.stickypickup.pickup", $"{gameObject.GetInstanceID()}");
             // synced variables
             BoneIndex = pickup.currentHand == VRC_Pickup.PickupHand.Left ? (int)HumanBodyBones.LeftHand : (int)HumanBodyBones.RightHand;
             CalculateOffsets((HumanBodyBones)this.BoneIndex);
@@ -120,10 +121,7 @@ namespace OttrOne.StickyPickup
 
             if (!rigidBody.isKinematic && !this.wasKinematic) // is gravity item
             {
-                this.gameObject.SetActive(false);
-                rigidBody.isKinematic = true;
-                this.gameObject.SetActive(true);
-                Debug.Log($"Enabled Kinematic");
+                SetKinematic(true);
             }
 
             RequestSerialization();
@@ -162,11 +160,9 @@ namespace OttrOne.StickyPickup
             RequestSerialization();
         }
 
-        public override void OnPickupUseDown()
+        public override void OnPickupUseUp()
         {
             if (PlaceOnDrop) return;
-            // additional ownership check
-            if (owner != Networking.LocalPlayer) return;
 
             TryAttach();
             // successful try will set localStickedOn to true
@@ -194,13 +190,10 @@ namespace OttrOne.StickyPickup
         /// </summary>
         public override void PostLateUpdate()
         {
-            if (owner == null) owner = Networking.GetOwner(gameObject);
-            if (!owner.IsValid()) owner = Networking.GetOwner(gameObject);
-
             if (localStickedOn)
             {
-                Vector3 bonePosition = owner.GetBonePosition(Bone);
-                Quaternion boneRotation = owner.GetBoneRotation(Bone);
+                Vector3 bonePosition = Networking.LocalPlayer.GetBonePosition(Bone);
+                Quaternion boneRotation = Networking.LocalPlayer.GetBoneRotation(Bone);
 
                 // calculate the wanted offset by multiplying the bonerotation with the position offset and add this to the targeted bone position
                 // calculate the wanted rotation by multiplying the current bone rotation with the calculated rotation offset 
@@ -213,14 +206,11 @@ namespace OttrOne.StickyPickup
             }
             else if (this.BoneIndex >= 0)
             {
-                Vector3 bonePosition = owner.GetBonePosition((HumanBodyBones)this.BoneIndex);
-                Quaternion boneRotation = owner.GetBoneRotation((HumanBodyBones)this.BoneIndex);
+                Vector3 bonePosition = Networking.GetOwner(gameObject).GetBonePosition((HumanBodyBones)this.BoneIndex);
+                Quaternion boneRotation = Networking.GetOwner(gameObject).GetBoneRotation((HumanBodyBones)this.BoneIndex);
                 if (!rigidBody.isKinematic && !this.wasKinematic) // is gravity item
                 {
-                    this.gameObject.SetActive(false);
-                    rigidBody.isKinematic = true;
-                    this.gameObject.SetActive(true);
-                    Debug.Log($"Enabled Kinematic");
+                    SetKinematic(true);
                 }
 
                 this.rigidBody.transform.SetPositionAndRotation((boneRotation * objectPosOffset) + bonePosition, boneRotation * objectRotOffset);
@@ -230,7 +220,7 @@ namespace OttrOne.StickyPickup
                 // idle gravity mode -> sync position till next pickup
                 if (objectPosOffset != rigidBody.transform.position)
                 {
-                    if (owner == Networking.LocalPlayer)
+                    if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
                     {
                         this.objectPosOffset = rigidBody.transform.position;
                         this.objectRotOffset = rigidBody.transform.rotation;
@@ -243,10 +233,7 @@ namespace OttrOne.StickyPickup
                 }
                 if (rigidBody.isKinematic && !this.wasKinematic)
                 {
-                    this.gameObject.SetActive(false);
-                    rigidBody.isKinematic = false;
-                    this.gameObject.SetActive(true);
-                    Debug.Log($"Disabled Kinematic");
+                    SetKinematic(false);
                 }
             }
 
@@ -263,11 +250,7 @@ namespace OttrOne.StickyPickup
 
         public override void OnOwnershipTransferred(VRCPlayerApi player)
         {
-            // set new owner
-            owner = player;
-            if (owner == Networking.LocalPlayer) return;
-
-            // reset old owner
+            BoneIndex = -1;
             pickup.Drop();
             localStickedOn = false;
             localPickedUp = false; // in case it gets stolen from the hands
@@ -275,7 +258,10 @@ namespace OttrOne.StickyPickup
 
         public override void OnPlayerJoined(VRCPlayerApi player)
         {
-            SendCustomEventDelayedSeconds("SyncLatePlayer", 2.5F, EventTiming.Update);
+            if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
+            {
+                SendCustomEventDelayedSeconds("SyncLatePlayer", 2.5F, EventTiming.Update);
+            }  
         }
 
         public void SyncLatePlayer()
