@@ -92,9 +92,16 @@ namespace OttrOne.StickyPickup
 
         private void SetKinematic(bool value)
         {
+            // disabling the object (workaround for triggering the collider) will reset velo
+            Vector3 velo = rigidBody.velocity;
+            Vector3 angyVelo = rigidBody.angularVelocity;
+
             this.gameObject.SetActive(false);
             rigidBody.isKinematic = value;
             this.gameObject.SetActive(true);
+
+            rigidBody.velocity = velo;
+            rigidBody.angularVelocity = angyVelo;
 
             Debug.Log($"Set kinematic to {value}");
         }
