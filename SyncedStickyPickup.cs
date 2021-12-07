@@ -24,7 +24,7 @@ namespace OttrOne.StickyPickup
     [UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
     public class SyncedStickyPickup : UdonSharpBehaviour
     {
-        [Header("SyncedStickyPickup v1.2.0")]
+        [Header("SyncedStickyPickup v1.2.1")]
         [SerializeField, Tooltip("Root bone for the Sticky Pickup.")]
         private HumanBodyBones Bone;
         [SerializeField, Tooltip("Radius of the spherical tracking area."), Range(0.001f, 4f)]
@@ -36,10 +36,16 @@ namespace OttrOne.StickyPickup
 
 
         [Header("Reset Options")]
+        [SerializeField, Tooltip("Using a legacy remote script for the reset on busy worlds.")]
+        private bool UseAlternativeColliderCheck = false;
         [SerializeField, Tooltip("Trigger collider as a cage for the pickup.")]
         private Collider AreaCollider;
         [SerializeField, Tooltip("Reset height will be ignored if area collider is given.")]
         private float ResetHeight = -50;
+
+        [Header("Debug Options - Disable in productive world")]
+        [SerializeField, Tooltip("Expose information to debug console.")]
+        private bool DebugMode = false;
 
         private bool localStickedOn = false;
         private bool localPickedUp = false;
@@ -61,6 +67,8 @@ namespace OttrOne.StickyPickup
 
         public void Start()
         {
+            if (DebugMode) Debug.Log($"[StickyPickup] started for {gameObject.name}");
+
             this.rigidBody = (Rigidbody)gameObject.GetComponent(typeof(Rigidbody));
             this.pickup = (VRC_Pickup)gameObject.GetComponent(typeof(VRC_Pickup));
             this.wasKinematic = rigidBody.isKinematic;
@@ -87,7 +95,7 @@ namespace OttrOne.StickyPickup
             SetKinematic(this.wasKinematic);
 
             this.rigidBody.transform.SetPositionAndRotation(_origPos, _origRot);
-            Debug.Log($"Requested Reset for {gameObject.name}");
+            if (DebugMode) Debug.Log($"[StickyPickup] Requested Reset for {gameObject.name}");
         }
 
         private void SetKinematic(bool value)
@@ -103,7 +111,7 @@ namespace OttrOne.StickyPickup
             rigidBody.velocity = velo;
             rigidBody.angularVelocity = angyVelo;
 
-            Debug.Log($"Set kinematic to {value}");
+            if (DebugMode) Debug.Log($"[StickyPickup] Set {gameObject.name} kinematic to {value}");
         }
 
         public void ResetPositionAllPlayers()
@@ -118,7 +126,6 @@ namespace OttrOne.StickyPickup
         public override void OnPickup()
         {
             Networking.SetOwner(Networking.LocalPlayer, this.gameObject);
-            Networking.LocalPlayer.SetPlayerTag("ottrone.stickypickup.pickup", $"{gameObject.GetInstanceID()}");
             // synced variables
             BoneIndex = pickup.currentHand == VRC_Pickup.PickupHand.Left ? (int)HumanBodyBones.LeftHand : (int)HumanBodyBones.RightHand;
             CalculateOffsets((HumanBodyBones)this.BoneIndex);
@@ -189,6 +196,7 @@ namespace OttrOne.StickyPickup
                 localPickedUp = false;
                 CalculateOffsets(Bone);
                 if (!PlaceOnDrop) pickup.Drop();
+                if (DebugMode) Debug.Log($"[StickyPickup] Attached {gameObject.name}");
             }
         }
 
@@ -244,11 +252,13 @@ namespace OttrOne.StickyPickup
                 }
             }
 
-            if (AreaCollider == null && rigidBody.transform.position.y < ResetHeight) ResetPositionAllPlayers();
+            if (AreaCollider == null && UseAlternativeColliderCheck == false && rigidBody.transform.position.y < ResetHeight) ResetPositionAllPlayers();
         }
 
         private void OnTriggerExit(Collider collider)
         {
+            if (UseAlternativeColliderCheck) return;
+            if (DebugMode) Debug.Log($"[StickyPickup] {gameObject.name} Exiting collider {collider}");
             if (collider == AreaCollider)
             {
                 SendCustomNetworkEvent(VRC.Udon.Common.Interfaces.NetworkEventTarget.All, "ResetPosition");
@@ -265,6 +275,7 @@ namespace OttrOne.StickyPickup
 
         public override void OnPlayerJoined(VRCPlayerApi player)
         {
+            if (DebugMode) Debug.Log($"[StickyPickup] {gameObject.name} will be synchronized for late joining players.");
             if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
             {
                 SendCustomEventDelayedSeconds("SyncLatePlayer", 2.5F, EventTiming.Update);

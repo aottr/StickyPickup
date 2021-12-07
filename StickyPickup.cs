@@ -23,7 +23,7 @@ namespace OttrOne.StickyPickup
     [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
     public class StickyPickup : UdonSharpBehaviour
     {
-        [Header("StickyPickup v1.1.0")]
+        [Header("StickyPickup v1.1.1")]
         [SerializeField, Tooltip("Root bone for the Sticky Pickup.")]
         private HumanBodyBones Bone;
         [SerializeField, Tooltip("Radius of the spherical tracking area."), Range(0.001f, 4f)]
@@ -39,6 +39,10 @@ namespace OttrOne.StickyPickup
         [SerializeField, Tooltip("Reset height will be ignored if area collider is given.")]
         private float ResetHeight = -50;
 
+        [Header("Debug Options - Disable in productive world")]
+        [SerializeField, Tooltip("Expose information to debug console.")]
+        private bool DebugMode = false;
+
         private bool stickedOn = false;
 
         private Vector3 trackedPos;
@@ -53,6 +57,8 @@ namespace OttrOne.StickyPickup
         private VRC_Pickup pickup;
         public void Start()
         {
+            if (DebugMode) Debug.Log($"[StickyPickup] started for {gameObject.name}");
+
             this.rigidBody = (Rigidbody)gameObject.GetComponent(typeof(Rigidbody));
             this.pickup = (VRC_Pickup)gameObject.GetComponent(typeof(VRC_Pickup));
             this.isKinematic = rigidBody.isKinematic;
@@ -73,6 +79,7 @@ namespace OttrOne.StickyPickup
             rigidBody.angularVelocity = Vector3.zero;
             SetKinematic(this.isKinematic);
             this.rigidBody.transform.SetPositionAndRotation(_origPos, _origRot);
+            if (DebugMode) Debug.Log($"[StickyPickup] Requested Reset for {gameObject.name}");
         }
 
         private void SetKinematic(bool value)
@@ -88,7 +95,7 @@ namespace OttrOne.StickyPickup
             rigidBody.velocity = velo;
             rigidBody.angularVelocity = angyVelo;
 
-            Debug.Log($"Set kinematic to {value}");
+            if (DebugMode) Debug.Log($"[StickyPickup] Set kinematic to {value}");
         }
         public override void OnPickup()
         {
@@ -137,6 +144,7 @@ namespace OttrOne.StickyPickup
                 // calculate the rotation by multiplying the current rotation with inverse player rotation
                 trackedRot = invRot * this.rigidBody.transform.rotation;
                 if (!PlaceOnDrop) pickup.Drop();
+                if (DebugMode) Debug.Log($"[StickyPickup] Attached {gameObject.name}");
                 return true;
             }
 
